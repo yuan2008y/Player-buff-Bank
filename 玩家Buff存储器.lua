@@ -26,8 +26,7 @@ local function ShowStoreBuffMenu(event, player, item)
     repeat
         local buffId = result:GetUInt32(0)
         if player:HasAura(buffId) then
-            player:GossipMenuAddItem(0, "存储 Buff: " .. buffId, 1, STORE_BUFF_OFFSET + buffId)
-            hasBuffToStore = true
+            player:GossipMenuAddItem(3, "存储 Buff: " .. buffId, 1, STORE_BUFF_OFFSET + buffId) 
         end
     until not result:NextRow()
 
@@ -36,7 +35,7 @@ local function ShowStoreBuffMenu(event, player, item)
         return
     end
 
-    player:GossipSendMenu(1, item)
+    player:GossipSendMenu(1, item) 
 end
 
 local function HandleStoreBuffSelection(player, intid, item)
@@ -88,7 +87,7 @@ local function ShowRetrieveBuffMenu(event, player, item)
 
     repeat
         local buffId = result:GetUInt32(0)
-        player:GossipMenuAddItem(0, "取出 Buff: " .. buffId, 1, RETRIEVE_BUFF_OFFSET + buffId)
+        player:GossipMenuAddItem(4, "取出 Buff: " .. buffId, 1, RETRIEVE_BUFF_OFFSET + buffId) -- 绿色表图标
     until not result:NextRow()
 
     player:GossipSendMenu(1, item)
@@ -121,10 +120,10 @@ local function ShowForgetBuffMenu(event, player, item)
 
     repeat
         local buffId = result:GetUInt32(0)
-        player:GossipMenuAddItem(0, "遗忘 Buff: " .. buffId, 1, FORGET_BUFF_OFFSET + buffId)
+        player:GossipMenuAddItem(9, "遗忘 Buff: " .. buffId, 1, FORGET_BUFF_OFFSET + buffId) 
     until not result:NextRow()
 
-    player:GossipSendMenu(1, item)
+    player:GossipSendMenu(1, item) 
 end
 
 local function HandleForgetBuffSelection(player, intid, item)
@@ -147,9 +146,9 @@ end
 -- 模块 4: 主菜单
 local function ShowMainMenu(event, player, item)
     player:GossipClearMenu()
-    player:GossipMenuAddItem(0, "存储 Buff", 1, 1)
-    player:GossipMenuAddItem(0, "取出 Buff", 1, 2)
-    player:GossipMenuAddItem(0, "遗忘 Buff", 1, 3)
+    player:GossipMenuAddItem(3, "存储 Buff", 1, 1) 
+    player:GossipMenuAddItem(4, "取出 Buff", 1, 2) 
+    player:GossipMenuAddItem(9, "遗忘 Buff", 1, 3) 
     player:GossipSendMenu(1, item)
 end
 
