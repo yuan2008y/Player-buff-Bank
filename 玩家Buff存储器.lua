@@ -21,7 +21,7 @@ local function GetSkillName(buffId)
     end
 end
 
--- 模块 1: 存储 Buff 功能
+-- 模块 1.1: 存储 Buff 功能-->列出玩家当前拥有的可以存储的所有buff
 local function ShowStoreBuffMenu(event, player, item)
     player:GossipClearMenu()
     local query = string.format("SELECT 技能ID, 技能名字 FROM %s", SKILLS_TABLE)
@@ -29,28 +29,47 @@ local function ShowStoreBuffMenu(event, player, item)
 
     if not result then
         player:SendBroadcastMessage("未配置允许存储的技能列表！")
+        ShowMainMenu(event, player, item)
         return
     end
 
+    local accountId = player:GetAccountId()
+    local charId = player:GetGUIDLow()
     local hasBuffToStore = false
 
     repeat
         local buffId = result:GetUInt32(0)
         local buffName = result:GetString(1) -- 从数据库中读取技能名字
         if player:HasAura(buffId) then
-            player:GossipMenuAddItem(3, "存储 Buff: " .. buffId .. " [" .. buffName .. "]", 1, STORE_BUFF_OFFSET + buffId)
+            -- 检查该Buff是否已经存储过
+            local checkQuery = string.format(
+                "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
+                BANK_TABLE, accountId, charId, buffId
+            )
+            local checkResult = WorldDBQuery(checkQuery)
+            local storedMark = ""
+            
+            if checkResult and checkResult:GetUInt32(0) > 0 then
+                storedMark = "【已存储】"
+            end
+            
+            player:GossipMenuAddItem(3, "存储 Buff: " .. buffId .. " [" .. buffName .. "]" .. storedMark, 1, STORE_BUFF_OFFSET + buffId)
             hasBuffToStore = true
         end
     until not result:NextRow()
 
     if not hasBuffToStore then
         player:SendBroadcastMessage("你没有任何可存储的 Buff！")
+        ShowMainMenu(event, player, item)
         return
     end
 
+    -- 添加返回主菜单的选项
+    player:GossipMenuAddItem(0, "<< 返回主菜单", 1, 0)
     player:GossipSendMenu(1, item)
 end
 
+-- 模块 1.2: 存储 Buff 功能-->存储鼠标点击的buff到数据库
 local function HandleStoreBuffSelection(player, intid, item)
     local buffId = intid - STORE_BUFF_OFFSET
 
@@ -79,7 +98,7 @@ local function HandleStoreBuffSelection(player, intid, item)
     ShowStoreBuffMenu(nil, player, item)
 end
 
--- 模块 2: 取出 Buff 功能
+-- 模块 2.1: 取出 Buff 功能--->列出数据库可以取出的所有buff
 local function ShowRetrieveBuffMenu(event, player, item)
     player:GossipClearMenu()
     local accountId = player:GetAccountId()
@@ -93,6 +112,7 @@ local function ShowRetrieveBuffMenu(event, player, item)
 
     if not result then
         player:SendBroadcastMessage("没有存储任何 Buff！")
+        ShowMainMenu(event, player, item)
         return
     end
 
@@ -102,9 +122,12 @@ local function ShowRetrieveBuffMenu(event, player, item)
         player:GossipMenuAddItem(4, "取出 Buff: " .. buffId .. " [" .. buffName .. "]", 1, RETRIEVE_BUFF_OFFSET + buffId)
     until not result:NextRow()
 
+    -- 添加返回主菜单的选项
+    player:GossipMenuAddItem(0, "<< 返回主菜单", 1, 0)
     player:GossipSendMenu(1, item)
 end
 
+-- 模块 2.2: 取出 Buff 功能--->应用鼠标点击的buff到玩家身上
 local function HandleRetrieveBuffSelection(player, intid, item)
     local buffId = intid - RETRIEVE_BUFF_OFFSET
     player:AddAura(buffId, player)
@@ -112,7 +135,7 @@ local function HandleRetrieveBuffSelection(player, intid, item)
     ShowRetrieveBuffMenu(nil, player, item)
 end
 
--- 模块 3: 遗忘 Buff 功能
+-- 模块 3.1: 遗忘 Buff 功能-->列出可以遗忘的所有buff
 local function ShowForgetBuffMenu(event, player, item)
     player:GossipClearMenu()
     local accountId = player:GetAccountId()
@@ -126,6 +149,7 @@ local function ShowForgetBuffMenu(event, player, item)
 
     if not result then
         player:SendBroadcastMessage("没有存储任何 Buff！")
+        ShowMainMenu(event, player, item)
         return
     end
 
@@ -135,9 +159,12 @@ local function ShowForgetBuffMenu(event, player, item)
         player:GossipMenuAddItem(9, "遗忘 Buff: " .. buffId .. " [" .. buffName .. "]", 1, FORGET_BUFF_OFFSET + buffId)
     until not result:NextRow()
 
+    -- 添加返回主菜单的选项
+    player:GossipMenuAddItem(0, "<< 返回主菜单", 1, 0)
     player:GossipSendMenu(1, item)
 end
 
+-- 模块 3.2: 遗忘 Buff 功能-->遗忘鼠标点击的buff，从数据库删除
 local function HandleForgetBuffSelection(player, intid, item)
     local buffId = intid - FORGET_BUFF_OFFSET
 
@@ -165,7 +192,10 @@ end
 
 -- 模块 5: 菜单处理逻辑
 local function HandleGossipSelect(event, player, item, sender, intid)
-    if intid == 1 then
+    if intid == 0 then
+        -- 返回主菜单
+        ShowMainMenu(event, player, item)
+    elseif intid == 1 then
         ShowStoreBuffMenu(event, player, item)
     elseif intid == 2 then
         ShowRetrieveBuffMenu(event, player, item)
@@ -179,6 +209,7 @@ local function HandleGossipSelect(event, player, item, sender, intid)
         HandleForgetBuffSelection(player, intid, item)
     else
         player:SendBroadcastMessage("未知的操作，请重试！")
+        ShowMainMenu(event, player, item)
     end
 end
 
