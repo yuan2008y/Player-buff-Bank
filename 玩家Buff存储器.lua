@@ -1,21 +1,21 @@
--- 全局配置配置信息
+-- 全局配置信息
 local ITEM_ENTRY = 1179 -- 指定可以调用 Buff 存储器界面的物品 Entry ID
 
--- 引用的数据库表名
-local SKILLS_TABLE = "_玩家buff存储器_可用技能" -- 存储允许保存的 Buff 列表
-local BANK_TABLE = "_玩家buff存储器_银行" -- 存储玩家已保存的 Buff
+-- 引用的数据库表名（需要添加自增ID字段）
+local SKILLS_TABLE = "_玩家buff存储器_可用技能" -- 需要添加 id INT AUTO_INCREMENT PRIMARY KEY
+local BANK_TABLE = "_玩家buff存储器_银行" -- 需要添加 id INT AUTO_INCREMENT PRIMARY KEY
 
--- 偏移量，用于不同功能查询的技能显示菜单 ID
+-- 偏移量
 local STORE_BUFF_OFFSET = 100000000
 local RETRIEVE_BUFF_OFFSET = 200000000
 local FORGET_BUFF_OFFSET = 300000000
 local ALL_BUFF_OFFSET = 400000000
-local PAGE_NAV_OFFSET = 500000000 -- 分页导航偏移量
+local PAGE_NAV_OFFSET = 500000000
 
 -- 分页设置
 local PAGE_SIZE = 20 -- 每页显示20个Buff
 
--- 颜色定义
+-- 颜色定义（颜色是八位数，如果位数错误，可能是结果导致显示不准!!!)
 local COLORS = {
     MAIN = "|cFF00CCFF",      -- 主色调(蓝色)
     TITLE = "|cFFFFFF00",     -- 标题色(橙色)
@@ -25,7 +25,7 @@ local COLORS = {
     ALL = "|cFF9933FF",       -- 展示功能色(紫色)
     PAGE = "|cFFFFFF00",      -- 页码色(黄色)
     WARNING = "|cFFFF0000",   -- 警告色(红色)
-    NORMAL = "|cF0000FF",    -- 普通文本色(白色)
+    NORMAL = "|cF0000FFF",    -- 普通文本色(白色)
     GRAY = "|cFF007FFF",      -- 灰色文本
     LINE = "|cFF555555"       -- 分隔线色
 }
@@ -43,7 +43,7 @@ end
 
 -- 添加分隔线
 local function AddSeparator(player)
-    player:GossipMenuAddItem(0, COLORS.LINE.."--------------------------|r", 1, 0)
+    player:GossipMenuAddItem(0, COLORS.LINE.."------------------------------|r", 1, 0)
 end
 
 -- 添加标题
@@ -52,97 +52,7 @@ local function AddTitle(player, title)
     AddSeparator(player)
 end
 
--- 通用分页显示函数
-local function ShowBuffList(player, item, menuType, baseOffset, query, currentPage)
-    currentPage = currentPage or 1
-    local offset = (currentPage - 1) * PAGE_SIZE
-    
-    -- 获取总数量
-    local countQuery = query:gsub("SELECT.-FROM", "SELECT COUNT(*) FROM")
-    local countResult = WorldDBQuery(countQuery)
-    local totalCount = countResult and countResult:GetUInt32(0) or 0
-    local totalPages = math.ceil(totalCount / PAGE_SIZE)
-    
-    player:GossipClearMenu()
-    
-    -- 添加菜单标题
-    local titles = {
-        store = "存储 Buff 列表",
-        retrieve = "取出 Buff 列表",
-        forget = "遗忘 Buff 列表",
-        all = "所有可用 Buff 列表"
-    }
-    AddTitle(player, titles[menuType])
-    
-    if totalCount == 0 then
-        local messages = {
-            store = "你没有任何可存储的 Buff！",
-            retrieve = "你的 Buff 银行是空的！",
-            forget = "没有可以遗忘的 Buff！",
-            all = "管理员尚未配置任何可用 Buff！"
-        }
-        player:GossipMenuAddItem(0, COLORS.WARNING..messages[menuType].."|r", 1, 0)
-        AddSeparator(player)
-        player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
-        player:GossipSendMenu(1, item)
-        return
-    end
-    
-    -- 获取当前页数据
-    local pagedQuery = query .. string.format(" LIMIT %d, %d", offset, PAGE_SIZE)
-    local result = WorldDBQuery(pagedQuery)
-    
-    -- 添加Buff列表
-    if result then
-        repeat
-            local buffId = result:GetUInt32(0)
-            local buffName = GetSkillName(buffId)
-            
-            if menuType == "store" then
-                local accountId = player:GetAccountId()
-                local charId = player:GetGUIDLow()
-                local checkQuery = string.format(
-                    "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
-                    BANK_TABLE, accountId, charId, buffId
-                )
-                local checkResult = WorldDBQuery(checkQuery)
-                local storedMark = ""
-                
-                if checkResult and checkResult:GetUInt32(0) > 0 then
-                    storedMark = COLORS.GRAY.." [已存储]|r"
-                end
-                
-                player:GossipMenuAddItem(3, COLORS.STORE.."存储|r "..COLORS.NORMAL..buffId.."|r - ["..buffName.."]"..storedMark, 1, STORE_BUFF_OFFSET + buffId)
-            elseif menuType == "retrieve" then
-                player:GossipMenuAddItem(4, COLORS.RETRIEVE.."取出|r "..COLORS.NORMAL..buffId.."|r - ["..buffName.."]", 1, RETRIEVE_BUFF_OFFSET + buffId)
-            elseif menuType == "forget" then
-                player:GossipMenuAddItem(9, COLORS.FORGET.."遗忘|r "..COLORS.NORMAL..buffId.."|r - ["..buffName.."]", 1, FORGET_BUFF_OFFSET + buffId)
-            elseif menuType == "all" then
-                player:GossipMenuAddItem(6, COLORS.ALL.."查看|r "..COLORS.NORMAL..buffId.."|r - ["..buffName.."]", 1, ALL_BUFF_OFFSET + buffId)
-            end
-        until not result:NextRow()
-    end
-    
-    AddSeparator(player)
-    
-    -- 添加分页导航
-    player:GossipMenuAddItem(0, COLORS.PAGE.."第 "..currentPage.." 页 / 共 "..totalPages.." 页|r", 1, baseOffset)
-    
-    if currentPage > 1 then
-        player:GossipMenuAddItem(0, COLORS.MAIN.."<< 上一页|r", 1, PAGE_NAV_OFFSET + (currentPage - 1) * 10 + baseOffset)
-    end
-    
-    if currentPage < totalPages then
-        player:GossipMenuAddItem(0, COLORS.MAIN.."下一页 >>|r", 1, PAGE_NAV_OFFSET + (currentPage + 1) * 10 + baseOffset)
-    end
-    
-    AddSeparator(player)
-    player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
-    player:GossipSendMenu(1, item)
-end
-
--- 模块 1.1: 存储 Buff 功能-->列出玩家当前拥有的可以存储的所有buff
--- 模块 1.1: 存储 Buff 功能-->列出玩家当前拥有的可以存储的所有buff（带分页）
+-- 模块 1.1: 存储 Buff 功能（修正查询语句）
 local function ShowStoreBuffMenu(event, player, item, page)
     page = page or 1
     player:GossipClearMenu()
@@ -150,8 +60,11 @@ local function ShowStoreBuffMenu(event, player, item, page)
     -- 添加标题
     AddTitle(player, "存储 Buff 列表")
     
-    -- 查询所有可存储的技能
-    local query = string.format("SELECT 技能ID, 技能名字 FROM %s", SKILLS_TABLE)
+    -- 正确查询：获取所有可存储的技能（不限制玩家当前是否拥有）
+    local query = string.format(
+        "SELECT id, 技能ID, 技能名字 FROM %s ORDER BY id",
+        SKILLS_TABLE
+    )
     local result = WorldDBQuery(query)
 
     if not result then
@@ -165,14 +78,31 @@ local function ShowStoreBuffMenu(event, player, item, page)
     -- 收集玩家当前拥有的可存储Buff
     local availableBuffs = {}
     repeat
-        local buffId = tonumber(result:GetUInt32(0)) -- 确保转换为数字
-        local buffName = result:GetString(1) or "未知技能"
+        local rowId = result:GetUInt32(0)  -- 自增ID
+        local buffId = result:GetUInt32(1) -- 实际buff ID
+        local buffName = result:GetString(2) or "未知技能"
+        
+        -- 只显示玩家当前拥有的Buff
         if player:HasAura(buffId) then
+            -- 检查是否已存储
+            local accountId = player:GetAccountId()
+            local charId = player:GetGUIDLow()
+            local checkQuery = string.format(
+                "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
+                BANK_TABLE, accountId, charId, buffId
+            )
+            local checkResult = WorldDBQuery(checkQuery)
+            local storedMark = ""
+            
+            if checkResult and checkResult:GetUInt32(0) > 0 then
+                storedMark = COLORS.GRAY.." [已存储]|r"
+            end
+            
             table.insert(availableBuffs, {
+                rowId = rowId,
                 id = buffId,
                 name = buffName,
-                -- 使用更安全的菜单ID生成方式
-                menuId = STORE_BUFF_OFFSET + (buffId % 100000) -- 限制在合理范围内
+                storedMark = storedMark
             })
         end
     until not result:NextRow()
@@ -195,29 +125,16 @@ local function ShowStoreBuffMenu(event, player, item, page)
     -- 显示当前页的Buff
     for i = startIndex, endIndex do
         local buff = availableBuffs[i]
-        local accountId = player:GetAccountId()
-        local charId = player:GetGUIDLow()
-        
-        -- 检查是否已存储
-        local checkQuery = string.format(
-            "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
-            BANK_TABLE, accountId, charId, buff.id
+        player:GossipMenuAddItem(3, 
+            COLORS.STORE.."存储|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]"..buff.storedMark, 
+            1, 
+            STORE_BUFF_OFFSET + buff.rowId
         )
-        local checkResult = WorldDBQuery(checkQuery)
-        local storedMark = ""
-        
-        if checkResult and checkResult:GetUInt32(0) > 0 then
-            storedMark = COLORS.GRAY.." [已存储]|r"
-        end
-        
-        -- 使用安全的菜单ID
-        player:GossipMenuAddItem(3, COLORS.STORE.."存储|r "..COLORS.NORMAL..buff.id.."|r - ["..buff.name.."]"..storedMark, 
-                               1, buff.menuId) -- 使用预先计算的安全ID
     end
 
     AddSeparator(player)
     
-    -- 添加分页导航
+    -- 分页导航
     player:GossipMenuAddItem(0, COLORS.PAGE.."第 "..page.." 页 / 共 "..totalPages.." 页|r", 1, 1)
     
     if page > 1 then
@@ -233,19 +150,14 @@ local function ShowStoreBuffMenu(event, player, item, page)
     player:GossipSendMenu(1, item)
 end
 
--- 模块 1.2: 存储 Buff 功能-->存储鼠标点击的buff到数据库
+-- 模块 1.2: 存储 Buff 选择处理
 local function HandleStoreBuffSelection(player, intid, item)
-    -- 修正buffId获取方式
-    local menuOffset = intid - STORE_BUFF_OFFSET
-    local buffId = 0
+    local rowId = intid - STORE_BUFF_OFFSET
     
-    -- 需要重新查询实际buffId，因为menuId可能是截断后的值
-    local accountId = player:GetAccountId()
-    local charId = player:GetGUIDLow()
+    -- 通过自增ID获取buff信息
     local query = string.format(
-        "SELECT s.技能ID, s.技能名字 FROM %s s WHERE (s.技能ID %% 100000) = %d AND s.技能ID IN "..
-        "(SELECT DISTINCT spell FROM character_aura WHERE guid = %d) LIMIT 1",
-        SKILLS_TABLE, menuOffset, charId
+        "SELECT 技能ID, 技能名字 FROM %s WHERE id = %d",
+        SKILLS_TABLE, rowId
     )
     local result = WorldDBQuery(query)
     
@@ -255,10 +167,12 @@ local function HandleStoreBuffSelection(player, intid, item)
         return
     end
     
-    buffId = result:GetUInt32(0)
+    local buffId = result:GetUInt32(0)
     local buffName = result:GetString(1) or "未知技能"
     
     -- 检查是否已存储
+    local accountId = player:GetAccountId()
+    local charId = player:GetGUIDLow()
     local checkQuery = string.format(
         "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
         BANK_TABLE, accountId, charId, buffId
@@ -271,6 +185,7 @@ local function HandleStoreBuffSelection(player, intid, item)
         return
     end
 
+    -- 存储Buff
     local insertQuery = string.format(
         "INSERT INTO %s (玩家账号id, 角色id, 获得的buff法术id) VALUES (%d, %d, %d)",
         BANK_TABLE, accountId, charId, buffId
@@ -281,88 +196,189 @@ local function HandleStoreBuffSelection(player, intid, item)
     ShowStoreBuffMenu(nil, player, item)
 end
 
--- 模块 2.1: 取出 Buff 功能--->列出数据库可以取出的所有buff
+-- 模块 2.1: 取出 Buff 功能
 local function ShowRetrieveBuffMenu(event, player, item, page)
-    local accountId = player:GetAccountId()
-    local charId = player:GetGUIDLow()
+    page = page or 1
+    player:GossipClearMenu()
     
+    AddTitle(player, "取出 Buff 列表")
+    
+    -- 查询使用自增ID
     local query = string.format(
-        "SELECT 获得的buff法术id FROM %s WHERE 玩家账号id = %d AND 角色id = %d ORDER BY 获得的buff法术id",
-        BANK_TABLE, accountId, charId
-    )
-    
-    ShowBuffList(player, item, "retrieve", 2, query, page)
-end
-
--- 模块 3.1: 遗忘 Buff 功能-->列出可以遗忘的所有buff
-local function ShowForgetBuffMenu(event, player, item, page)
-    local accountId = player:GetAccountId()
-    local charId = player:GetGUIDLow()
-    
-    local query = string.format(
-        "SELECT 获得的buff法术id FROM %s WHERE 玩家账号id = %d AND 角色id = %d ORDER BY 获得的buff法术id",
-        BANK_TABLE, accountId, charId
-    )
-    
-    ShowBuffList(player, item, "forget", 3, query, page)
-end
-
--- 模块 4: 列出可以存储的所有buff
-local function ShowAllBuffMenu(event, player, item, page)
-    local query = string.format("SELECT 技能ID FROM %s ORDER BY 技能ID", SKILLS_TABLE)
-    ShowBuffList(player, item, "all", 4, query, page)
-end
-
--- 模块 1.2: 存储 Buff 功能-->存储鼠标点击的buff到数据库
-local function HandleStoreBuffSelection(player, intid, item)
-    local buffId = intid - STORE_BUFF_OFFSET
-    local buffName = GetSkillName(buffId)
-
-    local accountId = player:GetAccountId()
-    local charId = player:GetGUIDLow()
-
-    local query = string.format(
-        "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
-        BANK_TABLE, accountId, charId, buffId
+        "SELECT b.id, b.获得的buff法术id FROM %s b "..
+        "WHERE b.玩家账号id = %d AND b.角色id = %d "..
+        "ORDER BY b.id",
+        BANK_TABLE, player:GetAccountId(), player:GetGUIDLow()
     )
     local result = WorldDBQuery(query)
 
-    if result and result:GetUInt32(0) > 0 then
-        player:SendBroadcastMessage(COLORS.WARNING.."提示：|r"..COLORS.NORMAL.."你已经存储过 ["..buffName.."] 这个Buff了！|r")
-        ShowStoreBuffMenu(nil, player, item)
+    if not result then
+        player:GossipMenuAddItem(0, COLORS.WARNING.."你的 Buff 银行是空的！|r", 1, 0)
+        AddSeparator(player)
+        player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+        player:GossipSendMenu(1, item)
         return
     end
 
-    local insertQuery = string.format(
-        "INSERT INTO %s (玩家账号id, 角色id, 获得的buff法术id) VALUES (%d, %d, %d)",
-        BANK_TABLE, accountId, charId, buffId
-    )
-    WorldDBExecute(insertQuery)
+    -- 收集所有可取出Buff
+    local availableBuffs = {}
+    repeat
+        local rowId = result:GetUInt32(0)
+        local buffId = result:GetUInt32(1)
+        local buffName = GetSkillName(buffId)
+        table.insert(availableBuffs, {
+            rowId = rowId,
+            id = buffId,
+            name = buffName
+        })
+    until not result:NextRow()
 
-    player:SendBroadcastMessage(COLORS.STORE.."成功存储！|r"..COLORS.NORMAL.."已将 ["..buffName.."] 存入你的Buff银行。|r")
-    ShowStoreBuffMenu(nil, player, item)
+    -- 分页处理
+    local totalCount = #availableBuffs
+    local totalPages = math.ceil(totalCount / PAGE_SIZE)
+    local startIndex = (page - 1) * PAGE_SIZE + 1
+    local endIndex = math.min(page * PAGE_SIZE, totalCount)
+
+    -- 显示当前页的Buff
+    for i = startIndex, endIndex do
+        local buff = availableBuffs[i]
+        player:GossipMenuAddItem(4, COLORS.RETRIEVE.."取出|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]", 
+                               1, RETRIEVE_BUFF_OFFSET + buff.rowId)
+    end
+
+    AddSeparator(player)
+    
+    -- 分页导航
+    player:GossipMenuAddItem(0, COLORS.PAGE.."第 "..page.." 页 / 共 "..totalPages.." 页|r", 1, 2)
+    
+    if page > 1 then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."<< 上一页|r", 1, PAGE_NAV_OFFSET + (page - 1) * 10 + 2)
+    end
+    
+    if page < totalPages then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."下一页 >>|r", 1, PAGE_NAV_OFFSET + (page + 1) * 10 + 2)
+    end
+    
+    AddSeparator(player)
+    player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+    player:GossipSendMenu(1, item)
 end
 
--- 模块 2.2: 取出 Buff 功能--->应用鼠标点击的buff到玩家身上
+-- 模块 2.2: 取出 Buff 选择处理
 local function HandleRetrieveBuffSelection(player, intid, item)
-    local buffId = intid - RETRIEVE_BUFF_OFFSET
+    local rowId = intid - RETRIEVE_BUFF_OFFSET
+    
+    -- 通过自增ID获取buff信息
+    local query = string.format(
+        "SELECT 获得的buff法术id FROM %s WHERE id = %d",
+        BANK_TABLE, rowId
+    )
+    local result = WorldDBQuery(query)
+    
+    if not result then
+        player:SendBroadcastMessage(COLORS.WARNING.."错误：|r"..COLORS.NORMAL.."找不到对应的Buff！|r")
+        ShowRetrieveBuffMenu(nil, player, item)
+        return
+    end
+    
+    local buffId = result:GetUInt32(0)
     local buffName = GetSkillName(buffId)
     player:AddAura(buffId, player)
     player:SendBroadcastMessage(COLORS.RETRIEVE.."成功取出！|r"..COLORS.NORMAL.."Buff ["..buffName.."] 已应用到你的角色。|r")
     ShowRetrieveBuffMenu(nil, player, item)
 end
 
--- 模块 3.2: 遗忘 Buff 功能-->遗忘鼠标点击的buff，从数据库删除
+-- 模块 3.1: 遗忘 Buff 功能
+local function ShowForgetBuffMenu(event, player, item, page)
+    page = page or 1
+    player:GossipClearMenu()
+    
+    AddTitle(player, "遗忘 Buff 列表")
+    
+    -- 查询使用自增ID
+    local query = string.format(
+        "SELECT b.id, b.获得的buff法术id FROM %s b "..
+        "WHERE b.玩家账号id = %d AND b.角色id = %d "..
+        "ORDER BY b.id",
+        BANK_TABLE, player:GetAccountId(), player:GetGUIDLow()
+    )
+    local result = WorldDBQuery(query)
+
+    if not result then
+        player:GossipMenuAddItem(0, COLORS.WARNING.."没有可以遗忘的 Buff！|r", 1, 0)
+        AddSeparator(player)
+        player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+        player:GossipSendMenu(1, item)
+        return
+    end
+
+    -- 收集所有可遗忘Buff
+    local availableBuffs = {}
+    repeat
+        local rowId = result:GetUInt32(0)
+        local buffId = result:GetUInt32(1)
+        local buffName = GetSkillName(buffId)
+        table.insert(availableBuffs, {
+            rowId = rowId,
+            id = buffId,
+            name = buffName
+        })
+    until not result:NextRow()
+
+    -- 分页处理
+    local totalCount = #availableBuffs
+    local totalPages = math.ceil(totalCount / PAGE_SIZE)
+    local startIndex = (page - 1) * PAGE_SIZE + 1
+    local endIndex = math.min(page * PAGE_SIZE, totalCount)
+
+    -- 显示当前页的Buff
+    for i = startIndex, endIndex do
+        local buff = availableBuffs[i]
+        player:GossipMenuAddItem(9, COLORS.FORGET.."遗忘|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]", 
+                               1, FORGET_BUFF_OFFSET + buff.rowId)
+    end
+
+    AddSeparator(player)
+    
+    -- 分页导航
+    player:GossipMenuAddItem(0, COLORS.PAGE.."第 "..page.." 页 / 共 "..totalPages.." 页|r", 1, 3)
+    
+    if page > 1 then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."<< 上一页|r", 1, PAGE_NAV_OFFSET + (page - 1) * 10 + 3)
+    end
+    
+    if page < totalPages then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."下一页 >>|r", 1, PAGE_NAV_OFFSET + (page + 1) * 10 + 3)
+    end
+    
+    AddSeparator(player)
+    player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+    player:GossipSendMenu(1, item)
+end
+
+-- 模块 3.2: 遗忘 Buff 选择处理
 local function HandleForgetBuffSelection(player, intid, item)
-    local buffId = intid - FORGET_BUFF_OFFSET
+    local rowId = intid - FORGET_BUFF_OFFSET
+    
+    -- 通过自增ID获取buff信息
+    local query = string.format(
+        "SELECT 获得的buff法术id FROM %s WHERE id = %d",
+        BANK_TABLE, rowId
+    )
+    local result = WorldDBQuery(query)
+    
+    if not result then
+        player:SendBroadcastMessage(COLORS.WARNING.."错误：|r"..COLORS.NORMAL.."找不到对应的Buff！|r")
+        ShowForgetBuffMenu(nil, player, item)
+        return
+    end
+    
+    local buffId = result:GetUInt32(0)
     local buffName = GetSkillName(buffId)
 
-    local accountId = player:GetAccountId()
-    local charId = player:GetGUIDLow()
-
     local deleteQuery = string.format(
-        "DELETE FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
-        BANK_TABLE, accountId, charId, buffId
+        "DELETE FROM %s WHERE id = %d",
+        BANK_TABLE, rowId
     )
     WorldDBExecute(deleteQuery)
 
@@ -370,7 +386,73 @@ local function HandleForgetBuffSelection(player, intid, item)
     ShowForgetBuffMenu(nil, player, item)
 end
 
--- 模块 4: 主菜单
+-- 模块 4: 展示所有 Buff
+local function ShowAllBuffMenu(event, player, item, page)
+    page = page or 1
+    player:GossipClearMenu()
+    
+    AddTitle(player, "所有可用 Buff 列表")
+    
+    -- 查询使用自增ID
+    local query = string.format(
+        "SELECT id, 技能ID, 技能名字 FROM %s ORDER BY id",
+        SKILLS_TABLE
+    )
+    local result = WorldDBQuery(query)
+
+    if not result then
+        player:GossipMenuAddItem(0, COLORS.WARNING.."管理员尚未配置任何可用 Buff！|r", 1, 0)
+        AddSeparator(player)
+        player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+        player:GossipSendMenu(1, item)
+        return
+    end
+
+    -- 收集所有Buff
+    local availableBuffs = {}
+    repeat
+        local rowId = result:GetUInt32(0)
+        local buffId = result:GetUInt32(1)
+        local buffName = result:GetString(2) or "未知技能"
+        table.insert(availableBuffs, {
+            rowId = rowId,
+            id = buffId,
+            name = buffName
+        })
+    until not result:NextRow()
+
+    -- 分页处理
+    local totalCount = #availableBuffs
+    local totalPages = math.ceil(totalCount / PAGE_SIZE)
+    local startIndex = (page - 1) * PAGE_SIZE + 1
+    local endIndex = math.min(page * PAGE_SIZE, totalCount)
+
+    -- 显示当前页的Buff
+    for i = startIndex, endIndex do
+        local buff = availableBuffs[i]
+        player:GossipMenuAddItem(6, COLORS.ALL.."查看|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]", 
+                               1, ALL_BUFF_OFFSET + buff.rowId)
+    end
+
+    AddSeparator(player)
+    
+    -- 分页导航
+    player:GossipMenuAddItem(0, COLORS.PAGE.."第 "..page.." 页 / 共 "..totalPages.." 页|r", 1, 4)
+    
+    if page > 1 then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."<< 上一页|r", 1, PAGE_NAV_OFFSET + (page - 1) * 10 + 4)
+    end
+    
+    if page < totalPages then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."下一页 >>|r", 1, PAGE_NAV_OFFSET + (page + 1) * 10 + 4)
+    end
+    
+    AddSeparator(player)
+    player:GossipMenuAddItem(0, COLORS.MAIN.."返回主菜单|r", 1, 0)
+    player:GossipSendMenu(1, item)
+end
+
+-- 模块 5: 主菜单
 local function ShowMainMenu(event, player, item)
     player:GossipClearMenu()
     
@@ -405,7 +487,7 @@ local function ShowMainMenu(event, player, item)
     player:GossipSendMenu(1, item)
 end
 
--- 模块 5: 菜单处理逻辑
+-- 模块 6: 菜单处理逻辑
 local function HandleGossipSelect(event, player, item, sender, intid)
     -- 处理分页导航
     if intid >= PAGE_NAV_OFFSET then
@@ -425,7 +507,6 @@ local function HandleGossipSelect(event, player, item, sender, intid)
     end
     
     if intid == 0 then
-        -- 返回主菜单
         ShowMainMenu(event, player, item)
     elseif intid == 1 then
         ShowStoreBuffMenu(event, player, item)
