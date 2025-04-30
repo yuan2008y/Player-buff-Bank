@@ -9,6 +9,9 @@ local BANK_TABLE = "_玩家buff存储器_银行" -- 存储玩家已保存的 Buf
 local STORE_BUFF_OFFSET = 100000000
 local RETRIEVE_BUFF_OFFSET = 200000000
 local FORGET_BUFF_OFFSET = 300000000
+local ALL_BUFF_OFFSET = 400000000
+local PAGE_SIZE = 20 -- 每页显示20个Buff
+
 
 -- 获取技能名称的函数（从数据库读取）
 local function GetSkillName(buffId)
@@ -181,12 +184,41 @@ local function HandleForgetBuffSelection(player, intid, item)
     ShowForgetBuffMenu(nil, player, item)
 end
 
+
+
+-- 模块 4: 列出可以存储的所有buff
+local function ShowAllBuffMenu(event, player, item)
+	
+    player:GossipClearMenu()
+    local query = string.format("SELECT 技能ID, 技能名字 FROM %s", SKILLS_TABLE)
+    local result = WorldDBQuery(query)
+	
+    if not result then
+        player:SendBroadcastMessage("未配置可存储任何 Buff！")
+        ShowMainMenu(event, player, item)
+        return
+    end
+	
+     repeat
+         local buffId = result:GetUInt32(0)
+         local buffName = GetSkillName(buffId) -- 从数据库中读取技能名字
+		 player:GossipMenuAddItem(6, "展示 Buff: " .. buffId .. " [" .. buffName .. "]", 1, ALL_BUFF_OFFSET + buffId)
+	  -- player:SendBroadcastMessage("测试展示 Buff: " .. buffId .. " [" .. buffName .. "]")
+	   until not result:NextRow()
+	       -- 添加返回主菜单的选项
+    player:GossipMenuAddItem(0, "<< 返回主菜单", 1, 0)
+    player:GossipSendMenu(1, item)
+
+end
+
+
 -- 模块 4: 主菜单
 local function ShowMainMenu(event, player, item)
     player:GossipClearMenu()
     player:GossipMenuAddItem(3, "存储 Buff", 1, 1)
     player:GossipMenuAddItem(4, "取出 Buff", 1, 2)
     player:GossipMenuAddItem(9, "遗忘 Buff", 1, 3)
+	player:GossipMenuAddItem(6, "展示 Buff", 1, 4)
     player:GossipSendMenu(1, item)
 end
 
@@ -201,14 +233,16 @@ local function HandleGossipSelect(event, player, item, sender, intid)
         ShowRetrieveBuffMenu(event, player, item)
     elseif intid == 3 then
         ShowForgetBuffMenu(event, player, item)
+	elseif intid == 4 then
+		ShowAllBuffMenu(event, player, item)
     elseif intid >= STORE_BUFF_OFFSET and intid < RETRIEVE_BUFF_OFFSET then
         HandleStoreBuffSelection(player, intid, item)
     elseif intid >= RETRIEVE_BUFF_OFFSET and intid < FORGET_BUFF_OFFSET then
         HandleRetrieveBuffSelection(player, intid, item)
-    elseif intid >= FORGET_BUFF_OFFSET then
+    elseif intid >= FORGET_BUFF_OFFSET and intid < ALL_BUFF_OFFSET then
         HandleForgetBuffSelection(player, intid, item)
     else
-        player:SendBroadcastMessage("未知的操作，请重试！")
+        player:SendBroadcastMessage("仅供查看！")
         ShowMainMenu(event, player, item)
     end
 end
