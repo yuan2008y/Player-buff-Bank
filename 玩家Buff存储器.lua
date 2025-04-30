@@ -1,9 +1,11 @@
 -- 全局配置信息
 local ITEM_ENTRY = 1179 -- 指定可以调用 Buff 存储器界面的物品 Entry ID
+local BASE_MAX_STORED_BUFFS = 10 -- 基础存储限制数量
 
--- 引用的数据库表名（需要添加自增ID字段）
-local SKILLS_TABLE = "_玩家buff存储器_可用技能" -- 需要添加 id INT AUTO_INCREMENT PRIMARY KEY
-local BANK_TABLE = "_玩家buff存储器_银行" -- 需要添加 id INT AUTO_INCREMENT PRIMARY KEY
+-- 引用的数据库表名
+local SKILLS_TABLE = "_玩家buff存储器_可用技能"
+local BANK_TABLE = "_玩家buff存储器_银行" 
+local VIP_TABLE = "_玩家buff存储器_vip" -- VIP信息表
 
 -- 偏移量
 local STORE_BUFF_OFFSET = 100000000
@@ -13,9 +15,9 @@ local ALL_BUFF_OFFSET = 400000000
 local PAGE_NAV_OFFSET = 500000000
 
 -- 分页设置
-local PAGE_SIZE = 20 -- 每页显示20个Buff
+local PAGE_SIZE = 7 -- 每页显示7个Buff
 
--- 颜色定义（颜色是八位数，如果位数错误，可能是结果导致显示不准!!!)
+-- 颜色定义
 local COLORS = {
     MAIN = "|cFF00CCFF",      -- 主色调(蓝色)
     TITLE = "|cFFFFFF00",     -- 标题色(橙色)
@@ -27,8 +29,26 @@ local COLORS = {
     WARNING = "|cFFFF0000",   -- 警告色(红色)
     NORMAL = "|cF0000FFF",    -- 普通文本色(白色)
     GRAY = "|cFF007FFF",      -- 灰色文本
-    LINE = "|cFF555555"       -- 分隔线色
+    LINE = "|cFF555555",      -- 分隔线色
+    VIP = "|cFFFFA500"        -- VIP颜色(橙色)
 }
+
+-- 获取玩家最大可存储Buff数量
+local function GetPlayerMaxBuffs(player)
+    local baseLimit = BASE_MAX_STORED_BUFFS
+    local accountId = player:GetAccountId()
+    
+    -- 查询VIP等级
+    local query = string.format(
+        "SELECT VIP等级 FROM %s WHERE 玩家账号id = %d",
+        VIP_TABLE, accountId
+    )
+    local result = WorldDBQuery(query)
+    
+    -- 如果有VIP等级，则增加限制数量
+    local vipLevel = result and result:GetUInt32(0) or 0
+    return baseLimit + vipLevel, vipLevel
+end
 
 -- 获取技能名称的函数（从数据库读取）
 local function GetSkillName(buffId)
@@ -52,7 +72,7 @@ local function AddTitle(player, title)
     AddSeparator(player)
 end
 
--- 模块 1.1: 存储 Buff 功能（修正查询语句）
+-- 模块 1.1: 存储 Buff 功能
 local function ShowStoreBuffMenu(event, player, item, page)
     page = page or 1
     player:GossipClearMenu()
@@ -60,9 +80,28 @@ local function ShowStoreBuffMenu(event, player, item, page)
     -- 添加标题
     AddTitle(player, "存储 Buff 列表")
     
-    -- 正确查询：获取所有可存储的技能（不限制玩家当前是否拥有）
+    -- 获取当前存储状态
+    local accountId = player:GetAccountId()
+    local charId = player:GetGUIDLow()
+    local countQuery = string.format(
+        "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d",
+        BANK_TABLE, accountId, charId
+    )
+    local countResult = WorldDBQuery(countQuery)
+    local buffCount = countResult and countResult:GetUInt32(0) or 0
+    local maxAllowed, vipLevel = GetPlayerMaxBuffs(player)
+    
+    -- 显示存储状态
+    if vipLevel > 0 then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."当前存储: "..buffCount.."/"..maxAllowed..COLORS.VIP.." (VIP+"..vipLevel..")|r", 1, 0)
+    else
+        player:GossipMenuAddItem(0, COLORS.MAIN.."当前存储: "..buffCount.."/"..maxAllowed.."|r", 1, 0)
+    end
+    AddSeparator(player)
+    
+    -- 查询可存储的技能
     local query = string.format(
-        "SELECT id, 技能ID, 技能名字 FROM %s ORDER BY id",
+        "SELECT id, 技能ID, 技能名字 FROM %s ORDER BY 技能ID",
         SKILLS_TABLE
     )
     local result = WorldDBQuery(query)
@@ -78,15 +117,11 @@ local function ShowStoreBuffMenu(event, player, item, page)
     -- 收集玩家当前拥有的可存储Buff
     local availableBuffs = {}
     repeat
-        local rowId = result:GetUInt32(0)  -- 自增ID
-        local buffId = result:GetUInt32(1) -- 实际buff ID
+        local rowId = result:GetUInt32(0)
+        local buffId = result:GetUInt32(1)
         local buffName = result:GetString(2) or "未知技能"
         
-        -- 只显示玩家当前拥有的Buff
         if player:HasAura(buffId) then
-            -- 检查是否已存储
-            local accountId = player:GetAccountId()
-            local charId = player:GetGUIDLow()
             local checkQuery = string.format(
                 "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d AND 获得的buff法术id = %d",
                 BANK_TABLE, accountId, charId, buffId
@@ -184,6 +219,22 @@ local function HandleStoreBuffSelection(player, intid, item)
         ShowStoreBuffMenu(nil, player, item)
         return
     end
+    
+    -- 检查是否已达到存储上限
+    local countQuery = string.format(
+        "SELECT COUNT(*) FROM %s WHERE 玩家账号id = %d AND 角色id = %d",
+        BANK_TABLE, accountId, charId
+    )
+    local countResult = WorldDBQuery(countQuery)
+    local currentCount = countResult and countResult:GetUInt32(0) or 0
+    local maxAllowed = GetPlayerMaxBuffs(player)
+    
+    if currentCount >= maxAllowed then
+        player:SendBroadcastMessage(COLORS.WARNING.."错误：|r"..COLORS.NORMAL.."你已经存储了 "..currentCount.." 个Buff，达到了上限 "..maxAllowed.."！|r")
+        player:SendBroadcastMessage(COLORS.WARNING.."提示：|r"..COLORS.NORMAL.."请先遗忘一些不需要的Buff再尝试存储新的。|r")
+        ShowStoreBuffMenu(nil, player, item)
+        return
+    end
 
     -- 存储Buff
     local insertQuery = string.format(
@@ -207,7 +258,7 @@ local function ShowRetrieveBuffMenu(event, player, item, page)
     local query = string.format(
         "SELECT b.id, b.获得的buff法术id FROM %s b "..
         "WHERE b.玩家账号id = %d AND b.角色id = %d "..
-        "ORDER BY b.id",
+        "ORDER BY b.获得的buff法术id",
         BANK_TABLE, player:GetAccountId(), player:GetGUIDLow()
     )
     local result = WorldDBQuery(query)
@@ -299,7 +350,7 @@ local function ShowForgetBuffMenu(event, player, item, page)
     local query = string.format(
         "SELECT b.id, b.获得的buff法术id FROM %s b "..
         "WHERE b.玩家账号id = %d AND b.角色id = %d "..
-        "ORDER BY b.id",
+        "ORDER BY b.获得的buff法术id",
         BANK_TABLE, player:GetAccountId(), player:GetGUIDLow()
     )
     local result = WorldDBQuery(query)
@@ -395,7 +446,7 @@ local function ShowAllBuffMenu(event, player, item, page)
     
     -- 查询使用自增ID
     local query = string.format(
-        "SELECT id, 技能ID, 技能名字 FROM %s ORDER BY id",
+        "SELECT id, 技能ID, 技能名字, 备注 FROM %s ORDER BY 技能ID",
         SKILLS_TABLE
     )
     local result = WorldDBQuery(query)
@@ -414,10 +465,12 @@ local function ShowAllBuffMenu(event, player, item, page)
         local rowId = result:GetUInt32(0)
         local buffId = result:GetUInt32(1)
         local buffName = result:GetString(2) or "未知技能"
+        local buffRemark=result:GetString(3) or "未知备注"
         table.insert(availableBuffs, {
             rowId = rowId,
             id = buffId,
-            name = buffName
+            name = buffName,
+            remark=buffRemark
         })
     until not result:NextRow()
 
@@ -430,7 +483,7 @@ local function ShowAllBuffMenu(event, player, item, page)
     -- 显示当前页的Buff
     for i = startIndex, endIndex do
         local buff = availableBuffs[i]
-        player:GossipMenuAddItem(6, COLORS.ALL.."查看|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]", 
+        player:GossipMenuAddItem(6, COLORS.ALL.."查看|r "..COLORS.NORMAL..tostring(buff.id).."|r - ["..buff.name.."]".."|r - ["..buff.remark.."]", 
                                1, ALL_BUFF_OFFSET + buff.rowId)
     end
 
@@ -468,8 +521,14 @@ local function ShowMainMenu(event, player, item)
     )
     local countResult = WorldDBQuery(countQuery)
     local buffCount = countResult and countResult:GetUInt32(0) or 0
+    local maxAllowed, vipLevel = GetPlayerMaxBuffs(player)
     
-    player:GossipMenuAddItem(0, COLORS.MAIN.."当前存储的Buff数量: |r"..COLORS.NORMAL..buffCount.."|r", 1, 0)
+    -- 显示存储状态
+    if vipLevel > 0 then
+        player:GossipMenuAddItem(0, COLORS.MAIN.."当前存储的Buff数量: |r"..COLORS.NORMAL..buffCount.."/"..maxAllowed..COLORS.VIP.." (VIP+"..vipLevel..")|r", 1, 0)
+    else
+        player:GossipMenuAddItem(0, COLORS.MAIN.."当前存储的Buff数量: |r"..COLORS.NORMAL..buffCount.."/"..maxAllowed.."|r", 1, 0)
+    end
     AddSeparator(player)
     
     -- 添加功能菜单
@@ -522,6 +581,9 @@ local function HandleGossipSelect(event, player, item, sender, intid)
         HandleRetrieveBuffSelection(player, intid, item)
     elseif intid >= FORGET_BUFF_OFFSET and intid < ALL_BUFF_OFFSET then
         HandleForgetBuffSelection(player, intid, item)
+    elseif intid >= ALL_BUFF_OFFSET then
+        player:SendBroadcastMessage("别点了，我就是个你可以获得的技能展示！|r")
+        ShowAllBuffMenu(event, player, item, page)
     else
         player:SendBroadcastMessage(COLORS.WARNING.."错误：|r"..COLORS.NORMAL.."无效的操作选项！|r")
         ShowMainMenu(event, player, item)
